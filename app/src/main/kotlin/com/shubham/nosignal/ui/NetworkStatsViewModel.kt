@@ -1,13 +1,11 @@
 package com.shubham.nosignal.ui
 
 import android.app.Application
-import androidx.compose.runtime.State
-import androidx.compose.runtime.mutableStateOf
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
-import com.shubham.nosignal.domain.NetworkStats
-import com.shubham.nosignal.domain.NetworkStatsRepository
-import kotlinx.coroutines.flow.catch
+import com.shubham.nosignal.service.SpeedMonitorService
+import com.shubham.nosignal.utils.Settings
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -15,64 +13,56 @@ import kotlinx.coroutines.launch
  */
 class NetworkStatsViewModel(application: Application) : AndroidViewModel(application) {
     
-    private val repository = NetworkStatsRepository(application.applicationContext)
+    private val settings = Settings(application.applicationContext)
     
-    private val _networkStats = mutableStateOf(
-        NetworkStats(
-            downloadSpeed = 0.0,
-            uploadSpeed = 0.0,
-            dailyDataUsed = 0.0
-        )
-    )
-    val networkStats: State<NetworkStats> = _networkStats
+    // StateFlows from the service
+    val downloadSpeed: StateFlow<Float> = SpeedMonitorService.downloadSpeed
+    val uploadSpeed: StateFlow<Float> = SpeedMonitorService.uploadSpeed
+    val isMonitoring: StateFlow<Boolean> = SpeedMonitorService.isMonitoring
     
-    private val _isLoading = mutableStateOf(true)
-    val isLoading: State<Boolean> = _isLoading
+    // Graph data from service (we'll need to expose this from service)
+    val downloadData: StateFlow<List<Float>> get() = _downloadData
+    val uploadData: StateFlow<List<Float>> get() = _uploadData
+    val isUsingBits: StateFlow<Boolean> get() = _isUsingBits
     
-    private val _error = mutableStateOf<String?>(null)
-    val error: State<String?> = _error
+    // Local StateFlows for graph data and unit preference
+    private val _downloadData = kotlinx.coroutines.flow.MutableStateFlow<List<Float>>(emptyList())
+    private val _uploadData = kotlinx.coroutines.flow.MutableStateFlow<List<Float>>(emptyList())
+    private val _isUsingBits = kotlinx.coroutines.flow.MutableStateFlow(settings.isUsingBits())
     
     init {
-        startNetworkMonitoring()
-    }
-    
-    /**
-     * Start collecting network statistics from the repository
-     */
-    private fun startNetworkMonitoring() {
+        // Update local StateFlows when service data changes
         viewModelScope.launch {
-            repository.getNetworkStats()
-                .catch { exception ->
-                    _error.value = "Failed to monitor network: ${exception.message}"
-                    _isLoading.value = false
+            // For now, we'll create mock graph data
+            // In a real implementation, you'd get this from the service's graph model
+            downloadSpeed.collect { speed ->
+                val currentData = _downloadData.value.toMutableList()
+                currentData.add(speed)
+                if (currentData.size > 120) { // Keep last 60 seconds
+                    currentData.removeAt(0)
                 }
-                .collect { stats ->
-                    _networkStats.value = stats
-                    _isLoading.value = false
-                    _error.value = null
+                _downloadData.value = currentData
+            }
+        }
+        
+        viewModelScope.launch {
+            uploadSpeed.collect { speed ->
+                val currentData = _uploadData.value.toMutableList()
+                currentData.add(speed)
+                if (currentData.size > 120) { // Keep last 60 seconds
+                    currentData.removeAt(0)
                 }
+                _uploadData.value = currentData
+            }
         }
     }
     
     /**
-     * Format speed value for display
+     * Toggle between bits and bytes display
      */
-    fun formatSpeed(speedKBps: Double): String {
-        return when {
-            speedKBps >= 1024 -> String.format("%.1f MB/s", speedKBps / 1024)
-            speedKBps >= 1 -> String.format("%.1f KB/s", speedKBps)
-            else -> String.format("%.0f B/s", speedKBps * 1024)
-        }
-    }
-    
-    /**
-     * Format data usage for display
-     */
-    fun formatDataUsage(dataMB: Double): String {
-        return when {
-            dataMB >= 1024 -> String.format("%.2f GB", dataMB / 1024)
-            dataMB >= 1 -> String.format("%.1f MB", dataMB)
-            else -> String.format("%.0f KB", dataMB * 1024)
-        }
+    fun toggleUnit() {
+        val newValue = !_isUsingBits.value
+        _isUsingBits.value = newValue
+        settings.setUsingBits(newValue)
     }
 }

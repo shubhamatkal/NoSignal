@@ -34,6 +34,10 @@ android {
     }
 }
 
+repositories {
+    maven { url = uri("https://jitpack.io") }
+}
+
 kotlin {
     jvmToolchain(21)
 }
@@ -47,6 +51,12 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview:1.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
+    
+    // For charts and graphs
+    implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")
+    
+    // For foreground service
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
 
     // Optional debug/test dependencies
     debugImplementation("androidx.compose.ui:ui-tooling:1.8.2")
