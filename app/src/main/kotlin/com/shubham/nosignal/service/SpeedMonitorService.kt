@@ -13,6 +13,9 @@ import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import com.shubham.nosignal.MainActivity
 import com.shubham.nosignal.R
+import com.shubham.nosignal.data.database.SpeedDatabase
+import com.shubham.nosignal.data.repository.SpeedSnapshotRepositoryImpl
+import com.shubham.nosignal.domain.repository.SpeedSnapshotRepository
 import com.shubham.nosignal.model.SpeedGraphModel
 import com.shubham.nosignal.utils.Settings
 import com.shubham.nosignal.utils.UnitFormatter
@@ -26,7 +29,6 @@ class SpeedMonitorService : Service() {
         const val NOTIFICATION_ID = 1001
         const val CHANNEL_ID = "speed_monitor_channel"
         const val ACTION_START_MONITORING = "action_start_monitoring"
-        const val ACTION_STOP_MONITORING = "action_stop_monitoring"
         
         // Shared state for the app
         private val _downloadSpeed = MutableStateFlow(0f)
@@ -44,7 +46,7 @@ class SpeedMonitorService : Service() {
     
     private lateinit var notificationManager: NotificationManager
     private lateinit var settings: Settings
-    private lateinit var speedGraphModel: SpeedGraphModel
+    private lateinit var repository: SpeedSnapshotRepository
     
     private var lastRxBytes = 0L
     private var lastTxBytes = 0L
@@ -54,23 +56,17 @@ class SpeedMonitorService : Service() {
         super.onCreate()
         notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         settings = Settings(this)
-        speedGraphModel = SpeedGraphModel()
+        
+        // Initialize Room database and repository
+        val database = SpeedDatabase.getDatabase(this)
+        repository = SpeedSnapshotRepositoryImpl(database.speedSnapshotDao())
         
         createNotificationChannel()
     }
     
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
-            ACTION_START_MONITORING -> startMonitoring()
-            ACTION_STOP_MONITORING -> stopMonitoring()
-            else -> {
-                // Check if monitoring was enabled previously
-                if (settings.isMonitoringEnabled()) {
-                    startMonitoring()
-                }
-            }
-        }
-        
+        // Always start monitoring when service is started
+        startMonitoring()
         return START_STICKY // Restart service if killed by system
     }
     
@@ -86,7 +82,6 @@ class SpeedMonitorService : Service() {
         if (_isMonitoring.value) return
         
         _isMonitoring.value = true
-        settings.setMonitoringEnabled(true)
         
         // Initialize baseline values
         lastRxBytes = TrafficStats.getTotalRxBytes()
@@ -110,7 +105,6 @@ class SpeedMonitorService : Service() {
     
     private fun stopMonitoring() {
         _isMonitoring.value = false
-        settings.setMonitoringEnabled(false)
         
         monitoringJob?.cancel()
         monitoringJob = null
@@ -119,7 +113,6 @@ class SpeedMonitorService : Service() {
         _uploadSpeed.value = 0f
         
         stopForeground(STOP_FOREGROUND_REMOVE)
-        stopSelf()
     }
     
     private suspend fun updateSpeeds() {
@@ -138,8 +131,16 @@ class SpeedMonitorService : Service() {
                 _downloadSpeed.value = downloadBytesPerSec
                 _uploadSpeed.value = uploadBytesPerSec
                 
-                // Add to graph model
-                speedGraphModel.addSample(downloadBytesPerSec, uploadBytesPerSec)
+                // Store data in Room database for persistence
+                try {
+                    repository.insertSnapshot(
+                        timestamp = currentTimestamp,
+                        downloadSpeed = downloadBytesPerSec,
+                        uploadSpeed = uploadBytesPerSec
+                    )
+                } catch (e: Exception) {
+                    e.printStackTrace()
+                }
                 
                 // Update notification
                 withContext(Dispatchers.Main) {
@@ -192,7 +193,4 @@ class SpeedMonitorService : Service() {
         val notification = createNotification(downloadSpeed, uploadSpeed)
         notificationManager.notify(NOTIFICATION_ID, notification)
     }
-    
-    // Static method to get graph model
-    fun getSpeedGraphModel(): SpeedGraphModel = speedGraphModel
 }

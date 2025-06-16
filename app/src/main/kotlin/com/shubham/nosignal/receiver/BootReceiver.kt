@@ -4,19 +4,19 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import com.shubham.nosignal.service.SpeedMonitorService
-import com.shubham.nosignal.utils.Settings
 import androidx.core.content.ContextCompat
 
+/**
+ * Boot receiver that automatically starts the SpeedMonitorService when device boots up
+ */
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (intent?.action == Intent.ACTION_BOOT_COMPLETED) {
-            val settings = Settings(context)
-            if (settings.isMonitoringEnabled()) {
-                val serviceIntent = Intent(context, SpeedMonitorService::class.java).apply {
-                    action = SpeedMonitorService.ACTION_START_MONITORING
-                }
-                ContextCompat.startForegroundService(context, serviceIntent)
+            // Always start the service on boot
+            val serviceIntent = Intent(context, SpeedMonitorService::class.java).apply {
+                action = SpeedMonitorService.ACTION_START_MONITORING
             }
+            ContextCompat.startForegroundService(context, serviceIntent)
         }
     }
 }

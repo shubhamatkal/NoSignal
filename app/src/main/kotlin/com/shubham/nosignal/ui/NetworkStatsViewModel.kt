@@ -3,9 +3,15 @@ package com.shubham.nosignal.ui
 import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.shubham.nosignal.data.database.SpeedDatabase
+import com.shubham.nosignal.data.database.entity.SpeedSnapshotEntity
+import com.shubham.nosignal.data.repository.SpeedSnapshotRepositoryImpl
+import com.shubham.nosignal.domain.repository.SpeedSnapshotRepository
 import com.shubham.nosignal.service.SpeedMonitorService
 import com.shubham.nosignal.utils.Settings
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 
 /**
@@ -14,45 +20,30 @@ import kotlinx.coroutines.launch
 class NetworkStatsViewModel(application: Application) : AndroidViewModel(application) {
     
     private val settings = Settings(application.applicationContext)
+    private val repository: SpeedSnapshotRepository
     
     // StateFlows from the service
     val downloadSpeed: StateFlow<Float> = SpeedMonitorService.downloadSpeed
     val uploadSpeed: StateFlow<Float> = SpeedMonitorService.uploadSpeed
     val isMonitoring: StateFlow<Boolean> = SpeedMonitorService.isMonitoring
     
-    // Graph data from service (we'll need to expose this from service)
-    val downloadData: StateFlow<List<Float>> get() = _downloadData
-    val uploadData: StateFlow<List<Float>> get() = _uploadData
-    val isUsingBits: StateFlow<Boolean> get() = _isUsingBits
+    // StateFlow for persistent speed data from Room
+    val speedSnapshots: StateFlow<List<SpeedSnapshotEntity>> get() = _speedSnapshots.asStateFlow()
+    private val _speedSnapshots = MutableStateFlow<List<SpeedSnapshotEntity>>(emptyList())
     
-    // Local StateFlows for graph data and unit preference
-    private val _downloadData = kotlinx.coroutines.flow.MutableStateFlow<List<Float>>(emptyList())
-    private val _uploadData = kotlinx.coroutines.flow.MutableStateFlow<List<Float>>(emptyList())
-    private val _isUsingBits = kotlinx.coroutines.flow.MutableStateFlow(settings.isUsingBits())
+    // Unit preference
+    val isUsingBits: StateFlow<Boolean> get() = _isUsingBits.asStateFlow()
+    private val _isUsingBits = MutableStateFlow(settings.isUsingBits())
     
     init {
-        // Update local StateFlows when service data changes
-        viewModelScope.launch {
-            // For now, we'll create mock graph data
-            // In a real implementation, you'd get this from the service's graph model
-            downloadSpeed.collect { speed ->
-                val currentData = _downloadData.value.toMutableList()
-                currentData.add(speed)
-                if (currentData.size > 120) { // Keep last 60 seconds
-                    currentData.removeAt(0)
-                }
-                _downloadData.value = currentData
-            }
-        }
+        // Initialize Room database and repository
+        val database = SpeedDatabase.getDatabase(application.applicationContext)
+        repository = SpeedSnapshotRepositoryImpl(database.speedSnapshotDao())
         
+        // Collect persistent data from Room
         viewModelScope.launch {
-            uploadSpeed.collect { speed ->
-                val currentData = _uploadData.value.toMutableList()
-                currentData.add(speed)
-                if (currentData.size > 120) { // Keep last 60 seconds
-                    currentData.removeAt(0)
-                }
-                _uploadData.value = currentData
+            repository.getLatestSnapshots().collect { snapshots ->
+                _speedSnapshots.value = snapshots
             }
         }
     }
@@ -64,5 +55,19 @@ class NetworkStatsViewModel(application: Application) : AndroidViewModel(applica
         val newValue = !_isUsingBits.value
         _isUsingBits.value = newValue
         settings.setUsingBits(newValue)
+    }
+    
+    /**
+     * Get download data as List<Float> for charts
+     */
+    fun getDownloadData(): List<Float> {
+        return _speedSnapshots.value.map { it.downloadSpeed }
+    }
+    
+    /**
+     * Get upload data as List<Float> for charts
+     */
+    fun getUploadData(): List<Float> {
+        return _speedSnapshots.value.map { it.uploadSpeed }
     }
 }

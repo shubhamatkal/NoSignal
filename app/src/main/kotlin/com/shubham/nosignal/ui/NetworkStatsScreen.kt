@@ -49,8 +49,11 @@ fun NetworkStatsScreen(
     val uploadSpeed by viewModel.uploadSpeed.collectAsState()
     val isMonitoring by viewModel.isMonitoring.collectAsState()
     val isUsingBits by viewModel.isUsingBits.collectAsState()
-    val downloadData by viewModel.downloadData.collectAsState()
-    val uploadData by viewModel.uploadData.collectAsState()
+    val speedSnapshots by viewModel.speedSnapshots.collectAsState()
+    
+    // Extract data for charts
+    val downloadData = remember(speedSnapshots) { speedSnapshots.map { it.downloadSpeed } }
+    val uploadData = remember(speedSnapshots) { speedSnapshots.map { it.uploadSpeed } }
     
     Column(
         modifier = Modifier
@@ -59,17 +62,8 @@ fun NetworkStatsScreen(
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // Header with service toggle
-        ServiceControlCard(
-            isMonitoring = isMonitoring,
-            onToggleMonitoring = { enabled ->
-                if (enabled) {
-                    startSpeedMonitorService(context)
-                } else {
-                    stopSpeedMonitorService(context)
-                }
-            }
-        )
+        // Status Header
+        StatusHeaderCard(isMonitoring = isMonitoring)
         
         // Unit toggle
         UnitToggleCard(
@@ -102,7 +96,7 @@ fun NetworkStatsScreen(
         }
         
         // Live graphs
-        if (isMonitoring) {
+        if (isMonitoring && downloadData.isNotEmpty()) {
             GraphCard(
                 title = "Download Speed",
                 data = downloadData,
@@ -119,14 +113,13 @@ fun NetworkStatsScreen(
         }
         
         // Status information
-        StatusCard(isMonitoring = isMonitoring)
+        StatusCard(isMonitoring = isMonitoring, dataCount = speedSnapshots.size)
     }
 }
 
 @Composable
-private fun ServiceControlCard(
-    isMonitoring: Boolean,
-    onToggleMonitoring: (Boolean) -> Unit
+private fun StatusHeaderCard(
+    isMonitoring: Boolean
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -146,15 +139,18 @@ private fun ServiceControlCard(
                     fontWeight = FontWeight.Bold
                 )
                 Text(
-                    text = if (isMonitoring) "Service is running" else "Service is stopped",
+                    text = if (isMonitoring) "Service is running continuously" else "Service is starting...",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (isMonitoring) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
-            Switch(
-                checked = isMonitoring,
-                onCheckedChange = onToggleMonitoring
+            // Status indicator
+            Icon(
+                imageVector = if (isMonitoring) Icons.Default.CheckCircle else Icons.Default.Pending,
+                contentDescription = if (isMonitoring) "Running" else "Starting",
+                tint = if (isMonitoring) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(32.dp)
             )
         }
     }
@@ -178,19 +174,35 @@ private fun UnitToggleCard(
         ) {
             Column {
                 Text(
-                    text = "Display Units",
+                    text = "Display Unit",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Medium
                 )
                 Text(
-                    text = if (isUsingBits) "Showing bits per second" else "Showing bytes per second",
+                    text = if (isUsingBits) "Showing in bits per second (bps)" else "Showing in bytes per second (B/s)",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
             
-            TextButton(onClick = onToggleUnit) {
-                Text(if (isUsingBits) "Switch to Bytes" else "Switch to Bits")
+            Row(
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Bytes",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (!isUsingBits) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Switch(
+                    checked = isUsingBits,
+                    onCheckedChange = { onToggleUnit() },
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                )
+                Text(
+                    text = "Bits",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (isUsingBits) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }
@@ -210,32 +222,33 @@ private fun SpeedCard(
         shape = RoundedCornerShape(12.dp)
     ) {
         Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
+            modifier = Modifier.padding(16.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = title,
-                tint = color,
-                modifier = Modifier.size(24.dp)
-            )
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = title,
+                    tint = color,
+                    modifier = Modifier.size(20.dp)
+                )
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Medium
+                )
+            }
             
             Spacer(modifier = Modifier.height(8.dp))
-            
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
             
             Text(
                 text = UnitFormatter.formatSpeed(speed, isUsingBits),
                 style = MaterialTheme.typography.headlineSmall,
                 fontWeight = FontWeight.Bold,
-                color = color,
-                textAlign = TextAlign.Center
+                color = color
             )
         }
     }
@@ -258,61 +271,83 @@ private fun GraphCard(
             Text(
                 text = title,
                 style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Medium,
-                modifier = Modifier.padding(bottom = 12.dp)
+                fontWeight = FontWeight.Medium
             )
             
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp),
-                factory = { context ->
-                    LineChart(context).apply {
-                        description.isEnabled = false
-                        setTouchEnabled(false)
-                        isDragEnabled = false
-                        setScaleEnabled(false)
-                        setPinchZoom(false)
-                        
-                        xAxis.apply {
-                            position = XAxis.XAxisPosition.BOTTOM
-                            setDrawGridLines(false)
-                            granularity = 1f
+            Spacer(modifier = Modifier.height(8.dp))
+            
+            if (data.isNotEmpty()) {
+                AndroidView(
+                    factory = { context ->
+                        LineChart(context).apply {
+                            description.isEnabled = false
+                            setTouchEnabled(false)
+                            setDragEnabled(false)
+                            setScaleEnabled(false)
+                            setPinchZoom(false)
+                            legend.isEnabled = false
+                            
+                            xAxis.apply {
+                                position = XAxis.XAxisPosition.BOTTOM
+                                setDrawGridLines(false)
+                                setDrawAxisLine(true)
+                                isEnabled = false
+                            }
+                            
+                            axisLeft.apply {
+                                setDrawGridLines(true)
+                                setDrawAxisLine(true)
+                                setLabelCount(5, false)
+                            }
+                            
+                            axisRight.isEnabled = false
+                        }
+                    },
+                    update = { chart ->
+                        val entries = data.mapIndexed { index, value ->
+                            Entry(index.toFloat(), value)
                         }
                         
-                        axisLeft.apply {
-                            setDrawGridLines(true)
-                            setDrawAxisLine(false)
+                        val dataSet = LineDataSet(entries, title).apply {
+                            this.color = Color.parseColor("#" + Integer.toHexString(color.hashCode()).substring(2))
+                            lineWidth = 2f
+                            setDrawCircles(false)
+                            setDrawValues(false)
+                            setDrawFilled(true)
+                            fillColor = this.color
+                            fillAlpha = 50
                         }
                         
-                        axisRight.isEnabled = false
-                        legend.isEnabled = false
-                    }
-                },
-                update = { chart ->
-                    val entries = data.mapIndexed { index, value ->
-                        val displayValue = if (isUsingBits) value * 8 else value
-                        Entry(index.toFloat(), displayValue)
-                    }
-                    
-                    val dataSet = LineDataSet(entries, title).apply {
-                        this.color = color.hashCode()
-                        lineWidth = 2f
-                        setDrawCircles(false)
-                        setDrawValues(false)
-                        mode = LineDataSet.Mode.CUBIC_BEZIER
-                    }
-                    
-                    chart.data = LineData(dataSet)
-                    chart.invalidate()
+                        chart.data = LineData(dataSet)
+                        chart.invalidate()
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp)
+                )
+            } else {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(200.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = "Collecting data...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
-            )
+            }
         }
     }
 }
 
 @Composable
-private fun StatusCard(isMonitoring: Boolean) {
+private fun StatusCard(
+    isMonitoring: Boolean,
+    dataCount: Int
+) {
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(12.dp)
@@ -340,13 +375,23 @@ private fun StatusCard(isMonitoring: Boolean) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                    text = "• Background service is active",
+                    text = "• Data points collected: $dataCount/120",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = "• Foreground service is active",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "• Data persists across app restarts",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.primary
                 )
             } else {
                 Text(
-                    text = "Turn on monitoring to see real-time speeds",
+                    text = "Starting network monitoring service...",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -355,16 +400,10 @@ private fun StatusCard(isMonitoring: Boolean) {
     }
 }
 
-private fun startSpeedMonitorService(context: Context) {
-    val intent = Intent(context, SpeedMonitorService::class.java).apply {
-        action = SpeedMonitorService.ACTION_START_MONITORING
+@Preview(showBackground = true)
+@Composable
+fun PreviewNetworkStatsScreen() {
+    MaterialTheme {
+        NetworkStatsScreen()
     }
-    ContextCompat.startForegroundService(context, intent)
-}
-
-private fun stopSpeedMonitorService(context: Context) {
-    val intent = Intent(context, SpeedMonitorService::class.java).apply {
-        action = SpeedMonitorService.ACTION_STOP_MONITORING
-    }
-    context.startService(intent)
 }

@@ -2,6 +2,7 @@ plugins {
     id("com.android.application")
     kotlin("android")
     kotlin("plugin.compose")
+    kotlin("kapt")
 }
 
 android {
@@ -51,6 +52,11 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview:1.8.2")
     implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.9.1")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.9.1")
+    
+    // Room database
+    implementation("androidx.room:room-runtime:2.6.1")
+    implementation("androidx.room:room-ktx:2.6.1")
+    kapt("androidx.room:room-compiler:2.6.1")
     
     // For charts and graphs
     implementation("com.github.PhilJay:MPAndroidChart:v3.1.0")

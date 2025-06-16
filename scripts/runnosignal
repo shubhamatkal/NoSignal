@@ -1,0 +1,46 @@
+#!/bin/bash
+# script which u can use to automate testing and debuging
+# this app on ur physical phone using adb
+echo "NoSignal Android App - Build and Run Script"
+echo "=========================================="
+
+# Check if ADB is available
+if ! command -v adb &> /dev/null; then
+    echo "Error: ADB is not available. Please install Android SDK Platform Tools."
+    exit 1
+fi
+
+# Check if device is connected
+DEVICES=$(adb devices | grep -v "List of devices" | grep "device$" | wc -l)
+if [ $DEVICES -eq 0 ]; then
+    echo "Error: No Android device connected via ADB."
+    echo "Please connect a device and enable USB debugging."
+    exit 1
+fi
+
+echo "Found $DEVICES connected device(s)"
+
+# Navigate to app directory
+cd app
+
+echo "Building the app..."
+./gradlew assembleDebug
+
+if [ $? -ne 0 ]; then
+    echo "Error: Build failed"
+    exit 1
+fi
+
+echo "Installing the app..."
+adb install -r build/outputs/apk/debug/app-debug.apk
+
+if [ $? -ne 0 ]; then
+    echo "Error: Installation failed"
+    exit 1
+fi
+
+echo "Starting the app..."
+adb shell am start -n com.shubham.nosignal/.MainActivity
+
+echo "App launched successfully!"
+echo "The network monitoring service should start automatically." 
