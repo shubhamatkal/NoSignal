@@ -63,6 +63,10 @@ dependencies {
     
     // For foreground service
     implementation("androidx.work:work-runtime-ktx:2.9.1")
+    
+    // OkHttp for networking
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+    implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
 
     // Optional debug/test dependencies
     debugImplementation("androidx.compose.ui:ui-tooling:1.8.2")
