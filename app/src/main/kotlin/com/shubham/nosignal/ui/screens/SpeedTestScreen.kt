@@ -22,6 +22,8 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.shubham.nosignal.domain.model.SpeedTestResult
 import com.shubham.nosignal.ui.SpeedTestViewModelNew
 import com.shubham.nosignal.ui.components.SpeedTestPopup
+import com.shubham.nosignal.ui.components.SpeedTestDetailPopup
+import com.shubham.nosignal.utils.UnitFormatter
 import java.text.SimpleDateFormat
 import java.util.*
 
@@ -30,19 +32,22 @@ fun SpeedTestScreen(
     isDarkMode: Boolean,
     viewModel: SpeedTestViewModelNew = viewModel()
 ) {
-    var isUsingBits by remember { mutableStateOf(false) }
-    var showSpeedTestPopup by remember { mutableStateOf(false) }
-    
-    // Observe ViewModel state
-    val networkType by viewModel.networkType.collectAsState()
-    val isConnected by viewModel.isConnected.collectAsState()
-    val isRunningTest by viewModel.isRunningTest.collectAsState()
-    val latestResult by viewModel.latestResult.collectAsState(initial = null)
-    val pastResults by viewModel.recentResults.collectAsState(initial = emptyList())
-    
-    val backgroundColor = if (isDarkMode) Color(0xFF000000) else Color.White
+    val backgroundColor = if (isDarkMode) Color.Black else Color.White
     val textColor = if (isDarkMode) Color.White else Color(0xFF141414)
     val secondaryTextColor = if (isDarkMode) Color(0xFF999999) else Color(0xFF737373)
+    
+    // State variables
+    var showSpeedTestPopup by remember { mutableStateOf(false) }
+    var showDetailPopup by remember { mutableStateOf(false) }
+    var selectedResult by remember { mutableStateOf<SpeedTestResult?>(null) }
+    var isRunningTest by remember { mutableStateOf(false) }
+    var isUsingBits by remember { mutableStateOf(false) }
+    
+    // Observe ViewModel state
+    val latestResult by viewModel.latestResult.collectAsState(initial = null)
+    val pastResults by viewModel.recentResults.collectAsState(initial = emptyList())
+    val networkType by viewModel.networkType.collectAsState()
+    val isConnected by viewModel.isConnected.collectAsState()
     
     Column(
         modifier = Modifier
@@ -87,6 +92,10 @@ fun SpeedTestScreen(
                     LatestSpeedTestCard(
                         result = result,
                         isUsingBits = isUsingBits,
+                        onClick = {
+                            selectedResult = result
+                            showDetailPopup = true
+                        },
                         textColor = textColor,
                         secondaryTextColor = secondaryTextColor,
                         isDarkMode = isDarkMode
@@ -112,7 +121,8 @@ fun SpeedTestScreen(
                         result = result,
                         isUsingBits = isUsingBits,
                         onClick = {
-                            // TODO: Navigate to detailed result screen
+                            selectedResult = result
+                            showDetailPopup = true
                         },
                         textColor = textColor,
                         secondaryTextColor = secondaryTextColor,
@@ -145,6 +155,14 @@ fun SpeedTestScreen(
         },
         isDarkMode = isDarkMode,
         viewModel = viewModel
+    )
+    
+    // Speed Test Detail Popup
+    SpeedTestDetailPopup(
+        showPopup = showDetailPopup,
+        speedTestResult = selectedResult,
+        onDismiss = { showDetailPopup = false },
+        isDarkMode = isDarkMode
     )
 }
 
@@ -325,6 +343,7 @@ private fun RunSpeedTestButton(
 private fun LatestSpeedTestCard(
     result: SpeedTestResult,
     isUsingBits: Boolean,
+    onClick: () -> Unit,
     textColor: Color,
     secondaryTextColor: Color,
     isDarkMode: Boolean
@@ -332,7 +351,9 @@ private fun LatestSpeedTestCard(
     val cardBackgroundColor = if (isDarkMode) Color(0xFF111111) else Color(0xFFF8F8F8)
     
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onClick() },
         shape = RoundedCornerShape(16.dp),
         colors = CardDefaults.cardColors(containerColor = cardBackgroundColor),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -355,7 +376,7 @@ private fun LatestSpeedTestCard(
                 // Download Speed
                 Column {
                     Text(
-                        text = formatSpeed(result.downloadMbps, isUsingBits),
+                        text = UnitFormatter.formatSpeed(result.downloadBps, isUsingBits),
                         fontSize = 24.sp,
                         fontWeight = FontWeight.Bold,
                         color = textColor
@@ -370,7 +391,7 @@ private fun LatestSpeedTestCard(
                 // Upload Speed
                 Column {
                     Text(
-                        text = formatSpeed(result.uploadMbps, isUsingBits),
+                        text = UnitFormatter.formatSpeed(result.uploadBps, isUsingBits),
                         fontSize = 18.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = textColor
@@ -439,13 +460,13 @@ private fun PastSpeedTestItem(
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     Text(
-                        text = "↓ ${formatSpeed(result.downloadMbps, isUsingBits)}",
+                        text = "↓ ${UnitFormatter.formatSpeed(result.downloadBps, isUsingBits)}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = textColor
                     )
                     Text(
-                        text = "↑ ${formatSpeed(result.uploadMbps, isUsingBits)}",
+                        text = "↑ ${UnitFormatter.formatSpeed(result.uploadBps, isUsingBits)}",
                         fontSize = 14.sp,
                         fontWeight = FontWeight.Medium,
                         color = textColor
@@ -475,15 +496,6 @@ private fun EmptyStateMessage(textColor: Color) {
             fontSize = 16.sp,
             color = textColor
         )
-    }
-}
-
-// Helper function to format speed based on bits/bytes preference
-private fun formatSpeed(mbps: Double, isUsingBits: Boolean): String {
-    return if (isUsingBits) {
-        String.format("%.1f Mbps", mbps)
-    } else {
-        String.format("%.1f MB/s", mbps / 8.0)
     }
 }
 

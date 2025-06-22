@@ -29,6 +29,7 @@ import com.shubham.nosignal.data.network.CloudflareSpeedTestEngine
 import com.shubham.nosignal.domain.model.SpeedTestResult
 import com.shubham.nosignal.ui.SpeedTestViewModelNew
 import com.shubham.nosignal.utils.ISPDetector
+import com.shubham.nosignal.utils.UnitFormatter
 import kotlinx.coroutines.delay
 import java.text.SimpleDateFormat
 import java.util.*
@@ -44,13 +45,14 @@ fun SpeedTestPopup(
     isDarkMode: Boolean = false,
     viewModel: SpeedTestViewModelNew = viewModel()
 ) {
-    var isRunning by remember { mutableStateOf(true) }
+    // Reset state when popup is opened
+    var isRunning by remember(showPopup) { mutableStateOf(showPopup) }
     var isUsingBits by remember { mutableStateOf(false) }
-    var finalResult by remember { mutableStateOf<SpeedTestResult?>(null) }
-    var errorMessage by remember { mutableStateOf<String?>(null) }
+    var finalResult by remember(showPopup) { mutableStateOf<SpeedTestResult?>(null) }
+    var errorMessage by remember(showPopup) { mutableStateOf<String?>(null) }
     
     // Create speed test engine and ISP detector
-    val speedTestEngine = remember { CloudflareSpeedTestEngine() }
+    val speedTestEngine = remember(showPopup) { CloudflareSpeedTestEngine() }
     val ispDetector = remember { ISPDetector(viewModel.getApplication()) }
     
     // Observe real-time values from speed test engine
@@ -116,6 +118,11 @@ fun SpeedTestPopup(
                 
                 finalResult = result
                 isRunning = false
+                
+                // Store the result in DB
+                viewModel.storeResult(result)
+                
+                // Don't call onTestDone here - let the summary be shown first
                 
             } catch (e: Exception) {
                 errorMessage = "Speed test failed: ${e.message}"
@@ -183,8 +190,8 @@ fun SpeedTestPopup(
                             onTestCancel()
                         },
                         onDone = {
+                            // Call onTestDone with the result if available, then dismiss
                             finalResult?.let { result ->
-                                viewModel.storeResult(result)
                                 onTestDone(result)
                             }
                             onDismiss()
@@ -500,7 +507,7 @@ private fun SpeedCard(
             )
             
             Text(
-                text = formatSpeed(speed, isUsingBits),
+                text = UnitFormatter.formatSpeed(speed, isUsingBits),
                 fontSize = 24.sp,
                 fontWeight = FontWeight.Bold,
                 color = textColor
@@ -595,8 +602,8 @@ private fun SummaryView(
                 textColor = textColor,
                 secondaryTextColor = secondaryTextColor
             ) {
-                SummaryMetric("Download", formatSpeed(result.downloadMbps, isUsingBits))
-                SummaryMetric("Upload", formatSpeed(result.uploadMbps, isUsingBits))
+                SummaryMetric("Download", UnitFormatter.formatSpeed(result.downloadBps, isUsingBits))
+                SummaryMetric("Upload", UnitFormatter.formatSpeed(result.uploadBps, isUsingBits))
             }
         }
         
@@ -785,14 +792,6 @@ private fun DrawScope.drawSpeedChart(
     }
 }
 
-private fun formatSpeed(mbps: Double, isUsingBits: Boolean): String {
-    return if (isUsingBits) {
-        String.format("%.1f Mbps", mbps)
-    } else {
-        String.format("%.1f MB/s", mbps / 8.0)
-    }
-}
-
 private fun formatDateTime(timestamp: Long): String {
     val format = SimpleDateFormat("MMM dd, yyyy 'at' h:mm a", Locale.getDefault())
     return format.format(Date(timestamp))
@@ -864,4 +863,274 @@ private fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier {
         indication = null,
         interactionSource = remember { MutableInteractionSource() }
     ) { onClick() }
+}
+
+/**
+ * Detailed popup for showing individual speed test results
+ */
+@Composable
+fun SpeedTestDetailPopup(
+    showPopup: Boolean,
+    speedTestResult: SpeedTestResult?,
+    onDismiss: () -> Unit,
+    isDarkMode: Boolean = false
+) {
+    var isUsingBits by remember { mutableStateOf(false) }
+    
+    if (showPopup && speedTestResult != null) {
+        Dialog(
+            onDismissRequest = onDismiss,
+            properties = DialogProperties(
+                dismissOnBackPress = true,
+                dismissOnClickOutside = false,
+                usePlatformDefaultWidth = false
+            )
+        ) {
+            // Background with blur effect
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Color.Black.copy(alpha = 0.7f))
+                    .blur(radius = 8.dp),
+                contentAlignment = Alignment.BottomCenter
+            ) {
+                // Main popup content
+                AnimatedVisibility(
+                    visible = showPopup,
+                    enter = slideInVertically(
+                        initialOffsetY = { it },
+                        animationSpec = spring(
+                            dampingRatio = Spring.DampingRatioMediumBouncy,
+                            stiffness = Spring.StiffnessLow
+                        )
+                    ),
+                    exit = slideOutVertically(
+                        targetOffsetY = { it },
+                        animationSpec = tween(300)
+                    )
+                ) {
+                    SpeedTestDetailContent(
+                        result = speedTestResult,
+                        isUsingBits = isUsingBits,
+                        onToggleUnit = { isUsingBits = !isUsingBits },
+                        onDismiss = onDismiss,
+                        isDarkMode = isDarkMode
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedTestDetailContent(
+    result: SpeedTestResult,
+    isUsingBits: Boolean,
+    onToggleUnit: () -> Unit,
+    onDismiss: () -> Unit,
+    isDarkMode: Boolean
+) {
+    val backgroundColor = if (isDarkMode) Color(0xFF111111) else Color.White
+    val textColor = if (isDarkMode) Color.White else Color(0xFF141414)
+    val secondaryTextColor = if (isDarkMode) Color(0xFF999999) else Color(0xFF737373)
+    val cardBackgroundColor = if (isDarkMode) Color(0xFF1E1E1E) else Color(0xFFF8F8F8)
+    
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .fillMaxHeight(0.9f),
+        shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
+        colors = CardDefaults.cardColors(containerColor = backgroundColor),
+        elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxSize()
+        ) {
+            // Header
+            SpeedTestDetailHeader(
+                textColor = textColor,
+                secondaryTextColor = secondaryTextColor,
+                timestamp = result.timestamp,
+                onDismiss = onDismiss
+            )
+            
+            // Content
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp),
+                verticalArrangement = Arrangement.spacedBy(16.dp)
+            ) {
+                item {
+                    // Bits/Bytes toggle
+                    UnitToggle(
+                        isUsingBits = isUsingBits,
+                        onToggleUnit = onToggleUnit,
+                        isDarkMode = isDarkMode
+                    )
+                }
+                
+                item {
+                    // Network Information card
+                    SummaryCard(
+                        title = "Network Information",
+                        backgroundColor = cardBackgroundColor,
+                        textColor = textColor,
+                        secondaryTextColor = secondaryTextColor
+                    ) {
+                        SummaryMetric("ISP", result.ispName)
+                        SummaryMetric("Connection", result.networkType)
+                        SummaryMetric("Test Date", formatDateTime(result.timestamp))
+                    }
+                }
+                
+                item {
+                    // Speed results
+                    SummaryCard(
+                        title = "Speed Results",
+                        backgroundColor = cardBackgroundColor,
+                        textColor = textColor,
+                        secondaryTextColor = secondaryTextColor
+                    ) {
+                        SummaryMetric("Download", UnitFormatter.formatSpeed(result.downloadBps, isUsingBits))
+                        SummaryMetric("Upload", UnitFormatter.formatSpeed(result.uploadBps, isUsingBits))
+                    }
+                }
+                
+                item {
+                    // Connection Quality
+                    SummaryCard(
+                        title = "Connection Quality",
+                        backgroundColor = cardBackgroundColor,
+                        textColor = textColor,
+                        secondaryTextColor = secondaryTextColor
+                    ) {
+                        SummaryMetric("Latency", "${result.unloadedLatencyMs.toInt()} ms")
+                        result.unloadedJitterMs?.let { jitter ->
+                            SummaryMetric("Jitter", "${jitter.toInt()} ms")
+                        }
+                        result.packetLossPercent?.let { packetLoss ->
+                            SummaryMetric("Packet Loss", "${String.format("%.1f", packetLoss)}%")
+                        }
+                    }
+                }
+                
+                item {
+                    // AIM Quality Scores
+                    if (result.aimScoreStreaming != null || result.aimScoreGaming != null || result.aimScoreRTC != null) {
+                        SummaryCard(
+                            title = "AIM Quality Scores",
+                            backgroundColor = cardBackgroundColor,
+                            textColor = textColor,
+                            secondaryTextColor = secondaryTextColor
+                        ) {
+                            result.aimScoreStreaming?.let { 
+                                SummaryMetric("Streaming", it)
+                            }
+                            result.aimScoreGaming?.let { 
+                                SummaryMetric("Gaming", it)
+                            }
+                            result.aimScoreRTC?.let { 
+                                SummaryMetric("Video Calls", it)
+                            }
+                        }
+                    }
+                }
+                
+                item {
+                    // Loaded test results (if available)
+                    if (result.loadedDownloadLatencyMs != null || result.loadedUploadLatencyMs != null) {
+                        SummaryCard(
+                            title = "Loaded Test Results",
+                            backgroundColor = cardBackgroundColor,
+                            textColor = textColor,
+                            secondaryTextColor = secondaryTextColor
+                        ) {
+                            result.loadedDownloadLatencyMs?.let { latency ->
+                                SummaryMetric("Download Latency", "${latency.toInt()} ms")
+                            }
+                            result.loadedUploadLatencyMs?.let { latency ->
+                                SummaryMetric("Upload Latency", "${latency.toInt()} ms")
+                            }
+                            result.loadedDownloadJitterMs?.let { jitter ->
+                                SummaryMetric("Download Jitter", "${jitter.toInt()} ms")
+                            }
+                            result.loadedUploadJitterMs?.let { jitter ->
+                                SummaryMetric("Upload Jitter", "${jitter.toInt()} ms")
+                            }
+                        }
+                    }
+                }
+                
+                // Bottom spacing
+                item {
+                    Spacer(modifier = Modifier.height(20.dp))
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SpeedTestDetailHeader(
+    textColor: Color,
+    secondaryTextColor: Color,
+    timestamp: Long,
+    onDismiss: () -> Unit
+) {
+    Column {
+        // Drag handle
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 12.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(40.dp)
+                    .height(4.dp)
+                    .background(
+                        Color.Gray.copy(alpha = 0.3f),
+                        RoundedCornerShape(2.dp)
+                    )
+            )
+        }
+        
+        // Header row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Speed Test Details",
+                    fontSize = 20.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = textColor
+                )
+                Text(
+                    text = formatDateTime(timestamp),
+                    fontSize = 14.sp,
+                    color = secondaryTextColor,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
+            
+            IconButton(
+                onClick = onDismiss,
+                modifier = Modifier.size(40.dp)
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = textColor,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    }
 }

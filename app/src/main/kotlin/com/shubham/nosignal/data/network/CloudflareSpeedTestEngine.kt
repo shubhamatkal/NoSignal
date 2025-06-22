@@ -109,11 +109,15 @@ class CloudflareSpeedTestEngine {
             _jitter.value = unloadedLatency.jitter
             _progress.value = 0.1f
             
+            Log.d(TAG, "Unloaded latency: ${unloadedLatency.average}ms, jitter: ${unloadedLatency.jitter}ms")
+            
             // Step 2: Download speed test (40%)
             Log.d(TAG, "Running download speed test...")
             val downloadResult = measureDownloadSpeed()
             _downloadSpeed.value = downloadResult.speedBps
             _progress.value = 0.5f
+            
+            Log.d(TAG, "Download speed: ${downloadResult.speedBps} bytes/sec")
             
             // Step 3: Upload speed test (40%)
             Log.d(TAG, "Running upload speed test...")
@@ -121,24 +125,35 @@ class CloudflareSpeedTestEngine {
             _uploadSpeed.value = uploadResult.speedBps
             _progress.value = 0.9f
             
+            Log.d(TAG, "Upload speed: ${uploadResult.speedBps} bytes/sec")
+            
             // Step 4: Measure loaded latency (10%)
             Log.d(TAG, "Measuring loaded latency...")
             val loadedLatency = measureLatency()
             _progress.value = 1.0f
             
+            Log.d(TAG, "Loaded latency: ${loadedLatency.average}ms, jitter: ${loadedLatency.jitter}ms")
+            
+            val packetLossPercent = calculatePacketLoss(unloadedLatency.samples)
+            Log.d(TAG, "Calculated packet loss: ${packetLossPercent}%")
+            
             Log.d(TAG, "Speed test completed successfully")
             
-            SpeedTestResults(
+            val results = SpeedTestResults(
                 downloadBps = downloadResult.speedBps,
                 uploadBps = uploadResult.speedBps,
                 latencyMs = unloadedLatency.average,
                 jitterMs = unloadedLatency.jitter,
-                packetLossPercent = calculatePacketLoss(unloadedLatency.samples),
+                packetLossPercent = packetLossPercent,
                 loadedDownLatencyMs = loadedLatency.average,
                 loadedUpLatencyMs = loadedLatency.average + 5, // Simulate difference
                 loadedDownJitterMs = loadedLatency.jitter,
                 loadedUpJitterMs = loadedLatency.jitter + 1 // Simulate difference
             )
+            
+            Log.d(TAG, "Final results: Download=${results.downloadBps}B/s, Upload=${results.uploadBps}B/s, Latency=${results.latencyMs}ms, Jitter=${results.jitterMs}ms, PacketLoss=${results.packetLossPercent}%")
+            
+            results
             
         } catch (e: Exception) {
             Log.e(TAG, "Speed test failed", e)
@@ -173,13 +188,13 @@ class CloudflareSpeedTestEngine {
                                 val bytes = resp.body?.bytes()?.size ?: 0
                                 val endTime = System.nanoTime()
                                 val durationSeconds = (endTime - startTime) / 1_000_000_000.0
-                                val speedBps = (bytes * 8.0) / durationSeconds // bits per second
+                                val speedBps = (bytes / durationSeconds) // bytes per second, not bits
                                 
-                                Log.d(TAG, "Download: ${bytes} bytes in ${durationSeconds}s = ${speedBps / 1_000_000} Mbps")
+                                Log.d(TAG, "Download: ${bytes} bytes in ${durationSeconds}s = ${speedBps / 1_000_000} MB/s")
                                 
-                                // Update real-time UI
+                                // Update real-time UI with bytes per second
                                 _downloadSpeed.value = speedBps
-                                history.add((speedBps / 1_000_000).toFloat())
+                                history.add((speedBps / 1_000_000).toFloat()) // Convert to MB/s for history
                                 _downloadHistory.value = history.takeLast(50)
                                 
                                 speedBps
@@ -237,13 +252,13 @@ class CloudflareSpeedTestEngine {
                             
                             if (resp.isSuccessful) {
                                 val durationSeconds = (endTime - startTime) / 1_000_000_000.0
-                                val speedBps = (size * 8.0) / durationSeconds // bits per second
+                                val speedBps = (size / durationSeconds) // bytes per second, not bits
                                 
-                                Log.d(TAG, "Upload: ${size} bytes in ${durationSeconds}s = ${speedBps / 1_000_000} Mbps")
+                                Log.d(TAG, "Upload: ${size} bytes in ${durationSeconds}s = ${speedBps / 1_000_000} MB/s")
                                 
-                                // Update real-time UI
+                                // Update real-time UI with bytes per second
                                 _uploadSpeed.value = speedBps
-                                history.add((speedBps / 1_000_000).toFloat())
+                                history.add((speedBps / 1_000_000).toFloat()) // Convert to MB/s for history
                                 _uploadHistory.value = history.takeLast(50)
                                 
                                 speedBps
@@ -277,13 +292,15 @@ class CloudflareSpeedTestEngine {
      */
     private suspend fun measureLatency(): LatencyResult = withContext(Dispatchers.IO) {
         val latencies = mutableListOf<Double>()
+        var successfulRequests = 0
         
-        repeat(LATENCY_SAMPLES) {
+        repeat(LATENCY_SAMPLES) { sampleIndex ->
             try {
                 val request = Request.Builder()
                     .url("$LATENCY_URL&r=${Random.nextInt()}")
                     .head() // Use HEAD request for minimal data
                     .header("User-Agent", "NoSignal-Android-SpeedTest/1.0")
+                    .header("Cache-Control", "no-cache")
                     .build()
                 
                 val startTime = System.nanoTime()
@@ -295,25 +312,47 @@ class CloudflareSpeedTestEngine {
                     if (resp.isSuccessful) {
                         val latencyMs = (endTime - startTime) / 1_000_000.0
                         latencies.add(latencyMs)
-                        Log.d(TAG, "Latency sample: ${latencyMs}ms")
+                        successfulRequests++
+                        
+                        Log.d(TAG, "Latency sample ${sampleIndex + 1}: ${latencyMs.toInt()}ms")
                         
                         // Update real-time UI
-                        _latency.value = latencies.average()
+                        val currentAverage = latencies.average()
+                        _latency.value = currentAverage
+                        
                         if (latencies.size >= 2) {
-                            _jitter.value = calculateJitter(latencies)
+                            val currentJitter = calculateJitter(latencies)
+                            _jitter.value = currentJitter
                         }
+                        
+                        // Calculate and update packet loss in real-time
+                        val currentPacketLoss = ((sampleIndex + 1 - successfulRequests).toDouble() / (sampleIndex + 1)) * 100.0
+                        _packetLoss.value = currentPacketLoss
+                    } else {
+                        Log.w(TAG, "Latency request failed: ${resp.code}")
                     }
                 }
                 
-                delay(100) // Wait between latency tests
-                
             } catch (e: Exception) {
-                Log.e(TAG, "Latency measurement error", e)
+                Log.e(TAG, "Latency measurement error for sample ${sampleIndex + 1}", e)
+            }
+            
+            // Add small delay between latency tests to avoid overwhelming the server
+            if (sampleIndex < LATENCY_SAMPLES - 1) {
+                delay(200)
             }
         }
         
-        val average = latencies.average()
+        val average = if (latencies.isNotEmpty()) latencies.average() else 0.0
         val jitter = calculateJitter(latencies)
+        val packetLossPercent = ((LATENCY_SAMPLES - successfulRequests).toDouble() / LATENCY_SAMPLES) * 100.0
+        
+        Log.d(TAG, "Latency results: avg=${average.toInt()}ms, jitter=${jitter.toInt()}ms, loss=${packetLossPercent}%")
+        
+        // Update final values
+        _latency.value = average
+        _jitter.value = jitter
+        _packetLoss.value = packetLossPercent
         
         LatencyResult(average, jitter, latencies)
     }
@@ -343,34 +382,42 @@ class CloudflareSpeedTestEngine {
      * Calculate AIM score for different use cases
      */
     fun calculateAimScores(results: SpeedTestResults): Triple<String, String, String> {
-        val downloadMbps = results.downloadBps / 1_000_000
-        val uploadMbps = results.uploadBps / 1_000_000
+        // Convert bytes per second to megabits per second
+        val downloadMbps = (results.downloadBps * 8) / 1_000_000 // Convert bytes to bits, then to Mbps
+        val uploadMbps = (results.uploadBps * 8) / 1_000_000 // Convert bytes to bits, then to Mbps
         val latency = results.latencyMs
         val jitter = results.jitterMs
+        
+        Log.d(TAG, "AIM Score calculation: Download=${downloadMbps}Mbps, Upload=${uploadMbps}Mbps, Latency=${latency}ms, Jitter=${jitter}ms")
         
         // Streaming score (based on download speed and latency)
         val streamingScore = when {
             downloadMbps >= 25 && latency <= 50 -> "Excellent"
             downloadMbps >= 15 && latency <= 100 -> "Good"
             downloadMbps >= 5 && latency <= 150 -> "Fair"
-            else -> "Poor"
+            downloadMbps >= 2 -> "Poor"
+            else -> "Very Poor"
         }
         
-        // Gaming score (based on latency and jitter)
+        // Gaming score (based on latency and jitter primarily)
         val gamingScore = when {
-            latency <= 20 && jitter <= 5 -> "Excellent"
-            latency <= 50 && jitter <= 10 -> "Good"
-            latency <= 100 && jitter <= 20 -> "Fair"
-            else -> "Poor"
+            latency <= 20 && jitter <= 5 && downloadMbps >= 3 -> "Excellent"
+            latency <= 50 && jitter <= 10 && downloadMbps >= 1 -> "Good"
+            latency <= 100 && jitter <= 20 && downloadMbps >= 0.5 -> "Fair"
+            latency <= 150 -> "Poor"
+            else -> "Very Poor"
         }
         
         // RTC/Video calls score (based on upload, latency, jitter)
         val rtcScore = when {
-            uploadMbps >= 5 && latency <= 50 && jitter <= 10 -> "Excellent"
-            uploadMbps >= 2 && latency <= 100 && jitter <= 20 -> "Good"
-            uploadMbps >= 1 && latency <= 150 && jitter <= 30 -> "Fair"
-            else -> "Poor"
+            uploadMbps >= 2 && latency <= 50 && jitter <= 10 && downloadMbps >= 1 -> "Excellent"
+            uploadMbps >= 1 && latency <= 100 && jitter <= 20 && downloadMbps >= 0.5 -> "Good"
+            uploadMbps >= 0.5 && latency <= 150 && jitter <= 30 -> "Fair"
+            uploadMbps >= 0.1 -> "Poor"
+            else -> "Very Poor"
         }
+        
+        Log.d(TAG, "AIM Scores: Streaming=$streamingScore, Gaming=$gamingScore, RTC=$rtcScore")
         
         return Triple(streamingScore, gamingScore, rtcScore)
     }
