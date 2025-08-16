@@ -21,20 +21,11 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Create gradlew wrapper
-        run: |
-          if [ ! -f "./gradlew" ]; then
-            gradle wrapper
-          fi
-      
-      - name: Grant execute permission for gradlew
-        run: chmod +x ./gradlew
-      
-      - name: Clean project
-        run: ./gradlew clean
-      
+      # Use Gradle directly without wrapper to avoid daemon issues
       - name: Build release APK
-        run: ./gradlew assembleRelease
+        run: gradle assembleRelease --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: '-Xmx2048m -XX:MaxMetaspaceSize=512m'
       
       - name: Create release assets directory
         run: mkdir -p release-assets
