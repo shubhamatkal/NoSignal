@@ -5,7 +5,7 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04  # Use specific Ubuntu version with older Gradle
+    runs-on: ubuntu-latest
     
     steps:
       - name: Checkout code
@@ -21,22 +21,24 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
       
-      - name: Setup Gradle 8.5 wrapper
+      # Force Gradle 8.7 installation and usage
+      - name: Install and setup Gradle 8.7
         run: |
-          # Remove any existing gradle files first
-          rm -rf .gradle gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties
-          # Create new wrapper with stable version
-          mkdir -p gradle/wrapper
-          echo "distributionBase=GRADLE_USER_HOME" > gradle/wrapper/gradle-wrapper.properties
-          echo "distributionPath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          echo "distributionUrl=https\://services.gradle.org/distributions/gradle-8.5-bin.zip" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStoreBase=GRADLE_USER_HOME" >> gradle/wrapper/gradle-wrapper.properties
-          echo "zipStorePath=wrapper/dists" >> gradle/wrapper/gradle-wrapper.properties
-          
-          # Download gradlew script
-          curl -L -o gradlew https://raw.githubusercontent.com/gradle/gradle/v8.5.0/gradle/wrapper/unix/gradlew
-          curl -L -o gradle/wrapper/gradle-wrapper.jar https://github.com/gradle/gradle/raw/v8.5.0/gradle/wrapper/gradle-wrapper.jar
-          chmod +x gradlew
+          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
+          unzip gradle-8.7-bin.zip
+          sudo mv gradle-8.7 /opt/gradle
+          echo "/opt/gradle/bin" >> $GITHUB_PATH
+        
+      - name: Verify Gradle version
+        run: |
+          export PATH="/opt/gradle/bin:$PATH"
+          gradle --version
+      
+      - name: Create gradlew with compatible version
+        run: |
+          export PATH="/opt/gradle/bin:$PATH"
+          gradle wrapper --gradle-version 8.7 --distribution-type bin
+          chmod +x ./gradlew
       
       - name: Build release APK
         run: ./gradlew assembleRelease --no-daemon --stacktrace --warning-mode=none
