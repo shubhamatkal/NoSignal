@@ -11,39 +11,50 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
       
-      - name: Set up JDK 17
+      - name: Set up JDK 11 (More compatible)
         uses: actions/setup-java@v4
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '11'
           cache: 'gradle'
       
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
       
-      # Force Gradle 8.7 installation and usage
-      - name: Install and setup Gradle 8.7
+      - name: Setup compatible Gradle wrapper
         run: |
-          wget https://services.gradle.org/distributions/gradle-8.7-bin.zip
-          unzip gradle-8.7-bin.zip
-          sudo mv gradle-8.7 /opt/gradle
-          echo "/opt/gradle/bin" >> $GITHUB_PATH
-        
-      - name: Verify Gradle version
-        run: |
-          export PATH="/opt/gradle/bin:$PATH"
-          gradle --version
-      
-      - name: Create gradlew with compatible version
-        run: |
-          export PATH="/opt/gradle/bin:$PATH"
-          gradle wrapper --gradle-version 8.7 --distribution-type bin
-          chmod +x ./gradlew
+          # Remove any existing gradle wrapper
+          rm -rf gradle/wrapper .gradle gradlew gradlew.bat
+          
+          # Create gradle wrapper directory
+          mkdir -p gradle/wrapper
+          
+          # Download Gradle 7.6.4 (most stable with KAPT)
+          cd gradle/wrapper
+          wget -q https://services.gradle.org/distributions/gradle-7.6.4-bin.zip
+          unzip -q gradle-7.6.4-bin.zip
+          mv gradle-7.6.4 gradle-dist
+          cd ../..
+          
+          # Create gradlew script manually
+          cat > gradlew << 'EOF'
+#!/usr/bin/env sh
+APP_BASE_NAME=`basename "$0"`
+APP_HOME=`pwd`
+GRADLE_HOME="$APP_HOME/gradle/wrapper/gradle-dist"
+exec "$GRADLE_HOME/bin/gradle" "$@"
+EOF
+          
+          chmod +x gradlew
+          
+          # Verify it works
+          ./gradlew --version
       
       - name: Build release APK
-        run: ./gradlew assembleRelease --no-daemon --stacktrace --warning-mode=none
+        run: |
+          ./gradlew clean assembleRelease --no-daemon --stacktrace
         env:
-          GRADLE_OPTS: '-Xmx3072m -XX:MaxMetaspaceSize=768m -Dfile.encoding=UTF-8'
+          GRADLE_OPTS: '-Xmx2048m -XX:MaxMetaspaceSize=512m'
       
       - name: Create release assets directory
         run: mkdir -p release-assets
@@ -52,6 +63,7 @@ jobs:
         run: |
           find app/build/outputs/apk/release/ -name "*.apk" -exec cp {} release-assets/NoSignal-v0.0.1-release.apk \;
           ls -la release-assets/
+          ls -la app/build/outputs/apk/release/ || echo "Release APK directory not found"
       
       - name: Upload Release APK
         uses: actions/upload-artifact@v4
