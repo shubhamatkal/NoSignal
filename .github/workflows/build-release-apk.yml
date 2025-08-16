@@ -23,36 +23,25 @@ jobs:
       
       - name: Setup compatible Gradle wrapper
         run: |
-          # Remove any existing gradle wrapper
           rm -rf gradle/wrapper .gradle gradlew gradlew.bat
-          
-          # Create gradle wrapper directory
           mkdir -p gradle/wrapper
-          
-          # Download Gradle 7.6.4 (most stable with KAPT)
           cd gradle/wrapper
           wget -q https://services.gradle.org/distributions/gradle-7.6.4-bin.zip
           unzip -q gradle-7.6.4-bin.zip
           mv gradle-7.6.4 gradle-dist
           cd ../..
-          
-          # Create gradlew script manually
           cat > gradlew << 'EOF'
-#!/usr/bin/env sh
-APP_BASE_NAME=`basename "$0"`
-APP_HOME=`pwd`
-GRADLE_HOME="$APP_HOME/gradle/wrapper/gradle-dist"
-exec "$GRADLE_HOME/bin/gradle" "$@"
-EOF
-          
+          #!/usr/bin/env sh
+          APP_BASE_NAME=`basename "$0"`
+          APP_HOME=`pwd`
+          GRADLE_HOME="$APP_HOME/gradle/wrapper/gradle-dist"
+          exec "$GRADLE_HOME/bin/gradle" "$@"
+          EOF
           chmod +x gradlew
-          
-          # Verify it works
           ./gradlew --version
       
       - name: Build release APK
-        run: |
-          ./gradlew clean assembleRelease --no-daemon --stacktrace
+        run: ./gradlew clean assembleRelease --no-daemon --stacktrace
         env:
           GRADLE_OPTS: '-Xmx2048m -XX:MaxMetaspaceSize=512m'
       
